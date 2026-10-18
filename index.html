@@ -1,0 +1,1996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#12284B">
+<title>Campus Navigator</title>
+<style>
+  :root {
+    --sky: #12284B;        /* deep evening blue, page ground */
+    --paving: #FFD23F;     /* tactile-paving yellow, the one bold thing */
+    --paving-press: #E6B92E;
+    --stop: #D9412B;
+    --ink: #FFFFFF;
+    --ink-on-paving: #12284B;
+    --muted: #B7C3D6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--sky);
+    color: var(--ink);
+    /* System font: respects the user's own accessibility text settings */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+             env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  header {
+    padding: 16px 20px 8px;
+  }
+  h1 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.01em;
+  }
+  #status {
+    min-height: 5.5rem;
+    padding: 12px 20px 16px;
+    font-size: 1.4rem;
+    line-height: 1.35;
+    font-weight: 500;
+  }
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 0 12px 12px;
+  }
+  .big {
+    flex: 1;
+    width: 100%;
+    border: 0;
+    border-radius: 18px;
+    background: var(--paving);
+    color: var(--ink-on-paving);
+    font: inherit;
+    font-size: clamp(1.6rem, 6vw, 2.2rem);
+    font-weight: 700;
+    line-height: 1.2;
+    padding: 16px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .big:active { background: var(--paving-press); }
+  .big:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  /* Camera preview with detection boxes drawn on top. Visual only: the
+     voice alerts are the accessible channel. Video and canvas both use
+     object-fit: contain with the canvas sized to the video, so boxes line up. */
+  #preview {
+    display: none;
+    position: relative;
+    height: 40vh;
+    margin: 0 12px 12px;
+    border: 2px solid var(--paving);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+  }
+  #preview.visible { display: block; }
+  #preview video, #preview canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+  }
+  .big.guard-on { background: var(--stop); color: var(--ink); }
+
+  /* Live list of detected objects + estimated distance (visual only;
+     the voice alerts are the accessible channel, so this isn't live-read) */
+  #detections {
+    display: none;
+    padding: 0 20px 12px;
+    font-size: 1.15rem;
+    line-height: 1.45;
+    color: var(--muted);
+  }
+  #detections.visible { display: block; }
+  #detections .inpath { color: var(--paving); font-weight: 700; }
+  #detections .danger { color: #FF8A7A; font-weight: 700; }
+  #status { white-space: pre-line; }
+
+  /* Emergency SOS */
+  .big.sos { background: var(--stop); color: var(--ink); }
+  .big.sos:active { background: #B8321F; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  #btnSosSetup {
+    font: inherit; font-size: 0.95rem; font-weight: 600;
+    background: transparent; color: var(--muted);
+    border: 2px solid var(--muted); border-radius: 10px;
+    padding: 6px 10px; cursor: pointer;
+  }
+  .panel {
+    position: fixed; inset: 0; z-index: 10;
+    background: var(--sky);
+    display: flex; flex-direction: column; gap: 14px;
+    padding: 24px 20px; overflow-y: auto;
+    font-size: 1.2rem;
+  }
+  .panel[hidden] { display: none; }
+  .panel h2 { font-size: 1.5rem; }
+  .panel label { display: flex; flex-direction: column; gap: 6px; }
+  .panel label.check { flex-direction: row; align-items: center; gap: 12px; }
+  .panel input[type="tel"], .panel select {
+    font: inherit; padding: 12px; border-radius: 10px; border: 0;
+  }
+  .panel input[type="checkbox"] { width: 28px; height: 28px; }
+  .panel .hint { color: var(--muted); font-size: 1rem; }
+  .panel .row { display: flex; gap: 12px; }
+  .panel .row button {
+    flex: 1; font: inherit; font-weight: 700; padding: 16px;
+    border: 0; border-radius: 14px; cursor: pointer;
+    background: var(--paving); color: var(--ink-on-paving);
+  }
+  .panel .row button.secondary { background: transparent; color: var(--ink); border: 2px solid var(--muted); }
+  #fallAlert { background: var(--stop); justify-content: center; text-align: center; }
+  #fallText { white-space: pre-line; font-size: clamp(1.6rem, 7vw, 2.4rem); font-weight: 700; line-height: 1.3; }
+  #fallAlert .big { flex: 0 0 auto; min-height: 30vh; background: var(--ink); color: var(--stop); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Campus Navigator</h1>
+  <button id="btnSosSetup">SOS contact</button>
+</header>
+<div id="status" role="status" aria-live="polite">Tap Proximity alert to begin.</div>
+<div id="detections" aria-hidden="true"></div>
+
+<div id="preview" aria-hidden="true">
+  <video id="guardVideo" playsinline muted></video>
+  <canvas id="overlay"></canvas>
+</div>
+
+<main>
+  <button class="big" id="btnGuard">Proximity alert</button>
+  <button class="big" id="btnTrack">Follow track</button>
+  <button class="big sos" id="btnSos">Emergency SOS</button>
+</main>
+
+<!-- SOS contact setup (usually filled in once by a sighted helper) -->
+<div id="sosSetup" class="panel" role="dialog" aria-modal="true" aria-labelledby="sosSetupTitle" hidden>
+  <h2 id="sosSetupTitle">SOS contact</h2>
+  <label>Phone number, with country code
+    <input id="sosNumber" type="tel" autocomplete="tel" placeholder="+91 98765 43210">
+  </label>
+  <label>Send by
+    <select id="sosMethod">
+      <option value="sms">SMS</option>
+      <option value="whatsapp">WhatsApp</option>
+    </select>
+  </label>
+  <label class="check"><input type="checkbox" id="sosFall" checked> Fall detection</label>
+  <p class="hint">The Emergency SOS button opens the Messages or WhatsApp app with the message and your location already filled in. Press Send there to send it.</p>
+  <div class="row">
+    <button id="sosSave">Save</button>
+    <button id="sosClose" class="secondary">Cancel</button>
+  </div>
+</div>
+
+<!-- Shown after a fall: SOS is sent unless cancelled -->
+<div id="fallAlert" class="panel" role="alertdialog" aria-modal="true" aria-labelledby="fallText" hidden>
+  <p id="fallText">Fall detected.</p>
+  <button class="big" id="fallCancel">I'm OK · Cancel</button>
+  <div class="row"><button id="fallSendNow" class="secondary">Send SOS now</button></div>
+</div>
+
+<script>
+const rad = d => d * Math.PI / 180;
+
+// ---------------------------------------------------------------
+// VOICE  — text-to-speech with iOS Safari workarounds
+// ---------------------------------------------------------------
+// iOS Safari requires speechSynthesis to be triggered from a user
+// gesture at least once before it will work from timers/callbacks.
+// We warm it up silently on the very first tap anywhere on the page.
+// We also add a 60 ms delay after cancel() because calling
+// cancel()+speak() in the same tick on iOS can silently drop the new
+// utterance, and an onstart resume() guard to unstick iOS when it
+// pauses mid-sentence (a known WebKit bug with long phrases).
+// ---------------------------------------------------------------
+const statusEl = document.getElementById('status');
+let lastSpoken  = null;
+let ttsReady    = false;
+let speakTimer  = null;
+
+function warmUpTTS() {
+  if (ttsReady || !('speechSynthesis' in window)) return;
+  ttsReady = true;
+  const silent = new SpeechSynthesisUtterance('');
+  silent.volume = 0;
+  speechSynthesis.speak(silent);
+}
+// Prime on every user tap so the first real alert never gets blocked
+document.addEventListener('click', warmUpTTS);
+document.addEventListener('touchstart', warmUpTTS, { passive: true });
+
+// `display` lets the screen show more detail (e.g. the distance in metres)
+// than is spoken aloud. Defaults to the spoken text.
+function speak(text, force = false, display = text) {
+  if (!force && text === lastSpoken) return;
+  lastSpoken = text;
+
+  // Always update the on-screen status text immediately — even if audio
+  // is blocked the sighted user / developer can read what was "said"
+  statusEl.textContent = display;
+
+  if (!('speechSynthesis' in window)) return;
+
+  // Cancel any current speech, then wait one tick so the cancel
+  // completes before we enqueue the new utterance
+  speechSynthesis.cancel();
+  if (speakTimer) { clearTimeout(speakTimer); speakTimer = null; }
+
+  speakTimer = setTimeout(() => {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang   = 'en-IN';   // Indian English voice when available
+    u.rate   = 0.92;      // slightly slower than default — clearer for a blind user
+    u.pitch  = 1.0;
+    u.volume = 1.0;
+
+    // iOS sometimes pauses mid-sentence; resume() unsticks it
+    u.onstart = () => {
+      setTimeout(() => {
+        try { if (speechSynthesis.paused) speechSynthesis.resume(); } catch (_) {}
+      }, 400);
+    };
+
+    // If the utterance errors (happens on some Android WebViews),
+    // retry once with a shorter text so at least the key word is heard.
+    // Same language as above, so the retry uses the same voice.
+    u.onerror = (e) => {
+      // cancelled intentionally by a newer alert — ignore
+      if (e.error === 'interrupted' || e.error === 'canceled') return;
+      try {
+        const fallback = new SpeechSynthesisUtterance(text.split('.')[0]);
+        fallback.lang = u.lang;
+        fallback.rate = u.rate;
+        speechSynthesis.speak(fallback);
+      } catch (_) {}
+    };
+
+    speechSynthesis.speak(u);
+  }, 60);
+}
+
+// ---------------------------------------------------------------
+// SCREEN WAKE LOCK — the camera loop stops if the screen sleeps
+// ---------------------------------------------------------------
+let wakeLock = null;
+
+async function keepScreenOn() {
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }
+  catch (_) {}
+}
+function releaseScreen() {
+  try { wakeLock && wakeLock.release(); } catch (_) {}
+  wakeLock = null;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && (guardActive || trackActive)) keepScreenOn();
+});
+
+// ---------------------------------------------------------------
+// PROXIMITY GUARD — obstacles and everyday items
+// Uses the rear camera + an in-browser object detector. The detector
+// knows all 80 COCO classes, but everything not in TARGET_CLASSES is
+// dropped straight after detection: never tracked, displayed or spoken.
+// TARGET_CLASSES has two kinds:
+//   obstacles (people, vehicles, animals, furniture, street furniture) —
+//     warned about when they are in the walking path, rules below;
+//   items (phone, bottle, book, laptop, bag ...) — never a danger, just a
+//     short note to help find them, anywhere in view and within
+//     ITEM_MAX_DIST_M: "Laptop on your left, about 1 metre."
+//
+// Voice rules for obstacles — only for those in the forward path (bounding-box
+// centre inside the middle CENTRAL_ZONE of the frame):
+//   distance >  DANGER_DISTANCE_M (2 m): presence only — "Car ahead."
+//   distance <= DANGER_DISTANCE_M      : safety warning + side to step to,
+//                                        from the left/right obstacle analysis
+//     "Car 1.5 metres ahead, coming towards you, move left."
+//        only when frame-to-frame tracking shows the gap closing faster
+//        than the user's own movement (phone motion sensors) can explain;
+//     "Car 1.5 metres ahead, very close to you, move left."
+//        otherwise — user walking/turning, no motion sensors, or not
+//        enough tracking history to be sure the object itself is moving.
+// Every alert is rate-limited (cooldowns below) so it isn't repeated
+// every frame; it repeats sooner only if the situation changes
+// significantly (new object, safer side flips, or it got much closer).
+//
+// Detector note: this runs coco-ssd (a MobileNet-SSD detector trained on
+// the same 80-class COCO dataset YOLO models use), not a literal YOLO
+// network. A real YOLOv8 pass in-browser needs hosting exported model
+// weights plus custom letterbox/NMS decoding that can't be verified
+// without a live camera to test against — a bug there would fail
+// silently for a safety feature. coco-ssd is an officially-published,
+// battle-tested pretrained COCO model that gets the same "which COCO
+// classes are in frame" result reliably. Swap in a real YOLOv8-tfjs
+// export later if you want, once you can test it live.
+//
+// Distance in metres uses the pinhole-camera relation
+//   distance = realObjectHeight x focalLengthPx / boxHeightPx
+// There's no calibrated focal length in a browser, so it's derived from
+// an assumed camera field of view (CAMERA_FOV_LONG_SIDE_DEG). Treat the
+// metres as approximate (roughly +/-30%). To calibrate for your phone:
+// stand a known distance (e.g. 3 m) from a person and adjust the FOV
+// until the on-screen reading matches.
+// ---------------------------------------------------------------
+
+// The only classes the guard reacts to (keys are the detector's COCO names).
+// Obstacles: h / w = typical real height / narrowest real width in metres
+// (w is used only when the box is cut off at the top/bottom of the frame —
+// see estimateDistanceM).
+// Items: long = longest real side in metres. Items lie at any angle (a book
+// flat on a table), so their distance uses the longest side of the box.
+const TARGET_CLASSES = {
+  // obstacles
+  person:          { label: 'Person',       h: 1.70, w: 0.50 },
+  car:             { label: 'Car',          h: 1.50, w: 1.80 },
+  bicycle:         { label: 'Bicycle',      h: 1.05, w: 0.60 },
+  motorcycle:      { label: 'Motorbike',    h: 1.10, w: 0.75 },
+  bus:             { label: 'Bus',          h: 3.00, w: 2.50 },
+  truck:           { label: 'Truck',        h: 3.00, w: 2.40 },
+  dog:             { label: 'Dog',          h: 0.60, w: 0.30 },
+  cat:             { label: 'Cat',          h: 0.30, w: 0.20 },
+  chair:           { label: 'Chair',        h: 0.90, w: 0.45 },
+  bench:           { label: 'Bench',        h: 0.80, w: 0.50 },
+  couch:           { label: 'Sofa',         h: 0.85, w: 0.90 },
+  bed:             { label: 'Bed',          h: 0.60, w: 1.00 },
+  'dining table':  { label: 'Table',        h: 0.75, w: 0.80 },
+  'potted plant':  { label: 'Plant pot',    h: 0.60, w: 0.35 },
+  'fire hydrant':  { label: 'Fire hydrant', h: 0.75, w: 0.30 },
+  // everyday items
+  'cell phone':    { label: 'Mobile phone', item: true, long: 0.15 },
+  book:            { label: 'Book',         item: true, long: 0.24 },
+  laptop:          { label: 'Laptop',       item: true, long: 0.35 },
+  bottle:          { label: 'Bottle',       item: true, long: 0.25 },
+  cup:             { label: 'Cup',          item: true, long: 0.10 },
+  bowl:            { label: 'Bowl',         item: true, long: 0.18 },
+  backpack:        { label: 'Backpack',     item: true, long: 0.45 },
+  handbag:         { label: 'Handbag',      item: true, long: 0.35 },
+  suitcase:        { label: 'Suitcase',     item: true, long: 0.65 },
+  umbrella:        { label: 'Umbrella',     item: true, long: 0.90 },
+  remote:          { label: 'TV remote',    item: true, long: 0.18 },
+  keyboard:        { label: 'Keyboard',     item: true, long: 0.45 },
+  mouse:           { label: 'Computer mouse', item: true, long: 0.11 },
+  clock:           { label: 'Clock',        item: true, long: 0.30 },
+  scissors:        { label: 'Scissors',     item: true, long: 0.20 },
+  toothbrush:      { label: 'Toothbrush',   item: true, long: 0.19 },
+};
+const isItem = cls => !!TARGET_CLASSES[cls].item;
+
+const DANGER_DISTANCE_M        = 2.0;   // at or within this -> danger warning
+const DANGER_HYSTERESIS_M      = 0.3;   // must go past 2.3 m to leave danger (stops flicker)
+const CENTRAL_ZONE             = 0.50;  // forward path = middle 50% of frame width
+const CAMERA_FOV_LONG_SIDE_DEG = 65;    // typical phone rear camera; tune per phone
+const DETECT_MIN_SCORE         = 0.5;
+const DETECT_MAX_BOXES         = 20;
+const GUARD_DETECT_INTERVAL_MS = 200;
+
+// Alert frequency
+const DANGER_COOLDOWN_MS       = 4000;  // repeat an unchanged danger warning at most this often
+const DANGER_MIN_GAP_MS        = 1500;  // even a changed warning waits this long after the last one
+const SIGNIFICANT_DIST_DROP_M  = 0.7;   // re-warn early if the object got this much closer
+const SIDE_SWITCH_MARGIN       = 0.25;  // other side must be 25% freer before "move" side flips
+const PRESENCE_COOLDOWN_MS     = 10000; // "Car ahead." at most once per class in this window
+const PRESENCE_QUIET_AFTER_DANGER_MS = 3000; // don't talk over a danger warning
+const ITEM_COOLDOWN_MS         = 15000; // "Laptop on your left ..." at most once per item type in this window
+const ITEM_MAX_DIST_M          = 4.0;   // only mention items within reach of a few steps
+
+// Tracking across consecutive frames
+const TRACK_MATCH_MIN_IOU      = 0.2;   // box overlap needed to be "the same object"
+const TRACK_MAX_AGE_MS         = 1000;  // drop a track unseen for this long
+const TRACK_WINDOW_MS          = 1500;  // distance history used for closing speed
+const TRACK_MIN_SAMPLES        = 4;
+const TRACK_MIN_SPAN_MS        = 600;
+const DIST_SMOOTHING           = 0.5;   // EMA weight of each new distance measurement
+
+// Deciding whether the OBJECT (not the user) is moving toward the user
+const OBJECT_APPROACH_MIN_MPS  = 0.6;   // closing speed attributable to the object
+const USER_WALK_MAX_MPS        = 1.8;   // brisk walking pace
+const EGO_WINDOW_MS            = 1000;
+const EGO_WALK_ACCEL_RMS       = 0.8;   // m/s^2 linear accel RMS above this -> user walking
+const EGO_TURN_DEG_S           = 25;    // rotation rate above this -> phone turning/panning
+
+const guardVideo = document.getElementById('guardVideo');
+const detectionsEl = document.getElementById('detections');
+let guardActive = false;
+let guardModel = null;
+let guardStream = null;
+let guardTimer = null;
+let guardBusy = false;
+let guardScriptsLoaded = false;
+let guardSession = 0;         // bumped on every start / stop, so a slow start can tell it was cancelled
+let tracks = [];
+let lastDangerSpokenAt = 0;
+let lastPresenceAt = {};
+let lastItemAt = {};
+
+const previewEl = document.getElementById('preview');
+const overlayEl = document.getElementById('overlay');
+const overlayCtx = overlayEl.getContext('2d');
+
+// "Calm" alerts (presence, road hazards) leave this gap between each
+// other so one never cuts another off mid-sentence. Danger warnings for
+// people / vehicles within 2 m still interrupt immediately.
+const ALERT_GAP_MS = 2500;
+let lastCalmAlertAt = 0;
+
+// Road hazard state (see ROAD HAZARDS section below)
+let hazardModel = null;
+let hazardIn = null;          // { size, nchw }
+let hazardDets = [];          // latest pass, drawn on the preview
+let hazardDetsAt = 0;
+let hazardHistory = [];       // per pass: Set of hazard keys seen in the forward path
+let lastHazardSpokenAt = {};
+
+function resetGuardHistory() {
+  tracks = [];
+  lastDangerSpokenAt = 0;
+  lastPresenceAt = {};
+  lastItemAt = {};
+  lastCalmAlertAt = 0;
+  hazardDets = [];
+  hazardDetsAt = 0;
+  hazardHistory = [];
+  lastHazardSpokenAt = {};
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.appendChild(s);
+  });
+}
+
+async function ensureGuardScripts() {
+  if (guardScriptsLoaded) return;
+  await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
+  await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js');
+  guardScriptsLoaded = true;
+}
+
+// TFLite runtime for the road-hazard model (tf.js must load first)
+const TFLITE_CDN = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-tflite@0.0.1-alpha.10/';
+let tfliteRuntime = null;
+function ensureTFLiteRuntime() {
+  if (!tfliteRuntime) {
+    tfliteRuntime = (async () => {
+      await loadScript(TFLITE_CDN + 'wasm/tflite_web_api_client.js');
+      await loadScript(TFLITE_CDN + 'dist/tf-tflite.min.js');
+      tflite.setWasmPath(TFLITE_CDN + 'wasm/');
+    })();
+    tfliteRuntime.catch(() => { tfliteRuntime = null; });   // allow a retry next time
+  }
+  return tfliteRuntime;
+}
+
+// First output tensor of a tflite predict() call, whatever shape the result has
+function firstOutput(out) {
+  if (Array.isArray(out)) return out[0];
+  if (out && out.dataSync) return out;
+  return Object.values(out)[0];
+}
+function disposeOutput(out) {
+  if (Array.isArray(out)) out.forEach(t => t.dispose());
+  else if (out && out.dispose) out.dispose();
+  else Object.values(out).forEach(t => t.dispose());
+}
+
+// ---------------------------------------------------------------
+// ROAD HAZARDS — manhole, pothole and speed bump
+// best_3class_hazard_model.tflite is a YOLOv8 detector:
+//   input  [1, 3, 640, 640]  RGB scaled 0-1, letterboxed with grey (114)
+//                            padding, channels-first
+//   output [1, 7, 8400]      per candidate box: cx, cy, w, h, then one
+//                            score per class
+// Class order from training: 0 = Manhole, 1 = Pothole, 2 = SpeedBreaker.
+// A hazard is spoken only when its box overlaps the forward path and it
+// was seen in HAZARD_CONFIRM of the last HAZARD_HISTORY passes, so a single
+// noisy frame never triggers an alert.
+// ---------------------------------------------------------------
+const HAZARD_MODEL_URL   = 'best_3class_hazard_model.tflite';
+const HAZARD_CLASSES = [            // index = model class id; also alert priority
+  { key: 'manhole', label: 'Manhole' },
+  { key: 'pothole', label: 'Pothole' },
+  { key: 'bump',    label: 'Bump' },
+];
+const HAZARD_MIN_SCORE   = 0.45;
+const HAZARD_NMS_IOU     = 0.45;
+const HAZARD_HISTORY     = 3;
+const HAZARD_CONFIRM     = 2;
+const HAZARD_REPEAT_MS   = 8000;    // same hazard spoken at most this often
+const HAZARD_FRESH_MS    = 1500;    // drop boxes from the preview if not refreshed
+
+const hazardCanvas = document.createElement('canvas');
+const hazardCtx = hazardCanvas.getContext('2d', { willReadFrequently: true });
+let hazardInput = null;
+
+async function loadHazardModel() {
+  if (hazardModel) return true;
+  try {
+    await ensureTFLiteRuntime();
+    const m = await tflite.loadTFLiteModel(HAZARD_MODEL_URL);
+    const s = m.inputs[0].shape;                 // [1,3,S,S] or [1,S,S,3]
+    const nchw = s[1] === 3;
+    hazardIn = { nchw, size: nchw ? s[2] : s[1] };
+    hazardModel = m;
+    return true;
+  } catch (e) {
+    console.warn('Hazard model failed to load:', e);
+    hazardModel = null;
+    return false;
+  }
+}
+
+// Returns detections as { key, label, score, bbox: [x, y, w, h] } in video pixels
+async function detectHazards(frameW, frameH) {
+  const S = hazardIn.size;
+  if (hazardCanvas.width !== S) { hazardCanvas.width = S; hazardCanvas.height = S; }
+  // Letterbox: keep the aspect ratio, pad the rest with grey, as YOLOv8 does
+  const r = Math.min(S / frameW, S / frameH);
+  const nw = Math.round(frameW * r), nh = Math.round(frameH * r);
+  const dx = Math.floor((S - nw) / 2), dy = Math.floor((S - nh) / 2);
+  hazardCtx.fillStyle = 'rgb(114,114,114)';
+  hazardCtx.fillRect(0, 0, S, S);
+  hazardCtx.drawImage(guardVideo, dx, dy, nw, nh);
+  const px = hazardCtx.getImageData(0, 0, S, S).data;
+
+  const n = S * S;
+  if (!hazardInput || hazardInput.length !== 3 * n) hazardInput = new Float32Array(3 * n);
+  if (hazardIn.nchw) {
+    for (let i = 0; i < n; i++) {
+      hazardInput[i]       = px[i*4]   / 255;
+      hazardInput[n + i]   = px[i*4+1] / 255;
+      hazardInput[2*n + i] = px[i*4+2] / 255;
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      hazardInput[i*3]   = px[i*4]   / 255;
+      hazardInput[i*3+1] = px[i*4+1] / 255;
+      hazardInput[i*3+2] = px[i*4+2] / 255;
+    }
+  }
+  const x = tf.tensor(hazardInput, hazardIn.nchw ? [1, 3, S, S] : [1, S, S, 3]);
+  const out = hazardModel.predict(x);
+  x.dispose();
+  const t = firstOutput(out);
+  const shape = t.shape, data = await t.data();
+  disposeOutput(out);
+
+  // [1, 4+classes, N] (usual) or [1, N, 4+classes]
+  let C = shape[1], N = shape[2], chFirst = true;
+  if (C > N) { C = shape[2]; N = shape[1]; chFirst = false; }
+  const at = chFirst ? (c, i) => data[c * N + i] : (c, i) => data[i * C + c];
+  const nc = Math.min(C - 4, HAZARD_CLASSES.length);
+
+  const cands = [];
+  let maxCoord = 0;
+  for (let i = 0; i < N; i++) {
+    let best = 0, cls = -1;
+    for (let c = 0; c < nc; c++) {
+      const s = at(4 + c, i);
+      if (s > best) { best = s; cls = c; }
+    }
+    const cx = at(0, i);
+    if (cx > maxCoord) maxCoord = cx;
+    if (best >= HAZARD_MIN_SCORE) cands.push({ cls, score: best, cx, cy: at(1, i), w: at(2, i), h: at(3, i) });
+  }
+  // Some exports give 0-1 coordinates instead of pixels of the 640 input
+  const k = maxCoord <= 2 ? S : 1;
+
+  const boxes = cands.map(c => {
+    let x1 = ((c.cx - c.w / 2) * k - dx) / r, y1 = ((c.cy - c.h / 2) * k - dy) / r;
+    let x2 = ((c.cx + c.w / 2) * k - dx) / r, y2 = ((c.cy + c.h / 2) * k - dy) / r;
+    x1 = Math.max(0, x1); y1 = Math.max(0, y1);
+    x2 = Math.min(frameW, x2); y2 = Math.min(frameH, y2);
+    return { cls: c.cls, score: c.score, bbox: [x1, y1, Math.max(0, x2 - x1), Math.max(0, y2 - y1)] };
+  }).filter(b => b.bbox[2] > 1 && b.bbox[3] > 1);
+
+  // Per-class non-maximum suppression
+  boxes.sort((a, b) => b.score - a.score);
+  const kept = [];
+  for (const b of boxes) {
+    if (kept.every(k2 => k2.cls !== b.cls || iou(k2.bbox, b.bbox) < HAZARD_NMS_IOU)) kept.push(b);
+  }
+  return kept.map(b => ({ ...HAZARD_CLASSES[b.cls], score: b.score, bbox: b.bbox }));
+}
+
+// Box overlaps the forward path (middle CENTRAL_ZONE of the frame width)
+function inForwardPath(bbox, frameW) {
+  const lo = (0.5 - CENTRAL_ZONE / 2) * frameW, hi = (0.5 + CENTRAL_ZONE / 2) * frameW;
+  return bbox[0] < hi && bbox[0] + bbox[2] > lo;
+}
+
+function updateHazardState(dets, frameW, now) {
+  for (const d of dets) d.inPath = inForwardPath(d.bbox, frameW);
+  hazardDets = dets;
+  hazardDetsAt = now;
+  hazardHistory.push(new Set(dets.filter(d => d.inPath).map(d => d.key)));
+  if (hazardHistory.length > HAZARD_HISTORY) hazardHistory.shift();
+}
+
+// "Pothole ahead." etc. Highest-priority confirmed hazard first.
+function maybeSpeakHazard(now) {
+  if (now - lastDangerSpokenAt < PRESENCE_QUIET_AFTER_DANGER_MS) return;
+  if (now - lastCalmAlertAt < ALERT_GAP_MS) return;
+  for (const h of HAZARD_CLASSES) {
+    const seen = hazardHistory.filter(s => s.has(h.key)).length;
+    if (seen < HAZARD_CONFIRM) continue;
+    if (now - (lastHazardSpokenAt[h.key] || 0) < HAZARD_REPEAT_MS) continue;
+    speak(`${h.label} ahead.`, true);
+    lastHazardSpokenAt[h.key] = now;
+    lastCalmAlertAt = now;
+    return;
+  }
+}
+
+// ---- Camera preview overlay ------------------------------------
+function drawOverlay(objDets, frameW, frameH, now) {
+  if (overlayEl.width !== frameW || overlayEl.height !== frameH) {
+    overlayEl.width = frameW; overlayEl.height = frameH;
+  }
+  const g = overlayCtx;
+  g.clearRect(0, 0, frameW, frameH);
+  const lw = Math.max(2, Math.round(frameW / 160));
+  const fs = Math.max(12, Math.round(frameW / 26));
+  g.font = `700 ${fs}px sans-serif`;
+  g.textBaseline = 'top';
+
+  const box = (bbox, color, text) => {
+    const [x, y, w, h] = bbox;
+    g.lineWidth = lw; g.strokeStyle = color;
+    g.strokeRect(x, y, w, h);
+    const tw = g.measureText(text).width + 8;
+    const ty = y - fs - 6 >= 0 ? y - fs - 6 : y;
+    g.fillStyle = color; g.fillRect(x, ty, tw, fs + 6);
+    g.fillStyle = '#12284B'; g.fillText(text, x + 4, ty + 3);
+  };
+
+  for (const d of objDets) {
+    // obstacles in blue, everyday items in green
+    box(d.bbox, isItem(d.cls) ? '#9BE88A' : '#7FD3FF', `${TARGET_CLASSES[d.cls].label} ${Math.round(d.score * 100)}%`);
+  }
+  if (now - hazardDetsAt <= HAZARD_FRESH_MS) {
+    for (const d of hazardDets) {
+      box(d.bbox, d.inPath ? '#FF5A43' : '#FFD23F', `${d.label} ${Math.round(d.score * 100)}%`);
+    }
+  }
+}
+
+// Free-space analysis: how much of the left vs right half of the view is
+// occupied. Each box's area is split by how much of it lies in each half,
+// so an object sitting centre-left counts mostly against the left side.
+// Only obstacles are passed in (a cup on a table doesn't block the way).
+function sideObstacleScore(dets, frameWidth) {
+  const mid = frameWidth / 2;
+  let left = 0, right = 0;
+  for (const d of dets) {
+    const [x, , w, h] = d.bbox;
+    left  += Math.max(0, Math.min(x + w, mid) - x) * h;
+    right += Math.max(0, (x + w) - Math.max(x, mid)) * h;
+  }
+  return { left, right };
+}
+
+function chooseSafeSide(left, right) {
+  if (left < right) return 'left';
+  if (right < left) return 'right';
+  return 'either';
+}
+
+// ---- Distance --------------------------------------------------
+function focalLengthPx(frameW, frameH) {
+  // The rated FOV applies across the sensor's long side, whichever way
+  // the phone is held.
+  return (Math.max(frameW, frameH) / 2) / Math.tan(rad(CAMERA_FOV_LONG_SIDE_DEG) / 2);
+}
+
+function estimateDistanceM(cls, bbox, frameW, frameH) {
+  const size = TARGET_CLASSES[cls];
+  const [, y, w, h] = bbox;
+  const f = focalLengthPx(frameW, frameH);
+  // Items lie at any angle, so match their longest real side to the box's longest side
+  if (size.item) return size.long * f / Math.max(w, h, 1);
+  let d = size.h * f / Math.max(h, 1);
+  // If the box is cut off by the top/bottom of the frame, the visible
+  // height is shorter than the real object and the estimate reads too
+  // far. Use the width-based estimate too and keep the nearer (safer) one.
+  const edge = 0.02;
+  if (y <= frameH * edge || y + h >= frameH * (1 - edge)) {
+    d = Math.min(d, size.w * f / Math.max(w, 1));
+  }
+  return d;
+}
+
+function fmtMetres(d) {
+  return d < 10 ? String(Number(d.toFixed(1))) : String(Math.round(d));
+}
+
+// ---- Tracking across consecutive frames ------------------------
+function iou(a, b) {
+  const x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]);
+  const x2 = Math.min(a[0] + a[2], b[0] + b[2]), y2 = Math.min(a[1] + a[3], b[1] + b[3]);
+  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const union = a[2] * a[3] + b[2] * b[3] - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+// Match this frame's detections to existing tracks (same class, best box
+// overlap). Sets det.track and det.dist (smoothed distance).
+function updateTracks(dets, now) {
+  const free = new Set(tracks);
+  for (const d of [...dets].sort((a, b) => b.score - a.score)) {
+    let best = null, bestIou = TRACK_MATCH_MIN_IOU;
+    for (const t of free) {
+      if (t.cls !== d.cls) continue;
+      const v = iou(t.bbox, d.bbox);
+      if (v > bestIou) { bestIou = v; best = t; }
+    }
+    if (best) {
+      free.delete(best);
+      best.dist += DIST_SMOOTHING * (d.rawDist - best.dist);
+    } else {
+      best = { cls: d.cls, dist: d.rawDist, history: [], inDanger: false,
+               presenceAnnounced: false, lastDangerAt: 0,
+               lastDangerDist: Infinity, lastSide: null };
+      tracks.push(best);
+    }
+    best.bbox = d.bbox;
+    best.lastSeen = now;
+    best.history.push({ t: now, d: d.rawDist });
+    while (best.history.length && best.history[0].t < now - TRACK_WINDOW_MS) best.history.shift();
+    d.track = best;
+    d.dist = best.dist;
+  }
+  tracks = tracks.filter(t => now - t.lastSeen <= TRACK_MAX_AGE_MS);
+}
+
+// Rate the gap is shrinking (m/s, positive = getting closer), from a
+// least-squares fit over the track's recent distance history. null if
+// there isn't enough history to say.
+function closingSpeedMps(track) {
+  const h = track.history;
+  if (h.length < TRACK_MIN_SAMPLES) return null;
+  if (h[h.length - 1].t - h[0].t < TRACK_MIN_SPAN_MS) return null;
+  let mt = 0, md = 0;
+  for (const s of h) { mt += s.t; md += s.d; }
+  mt /= h.length; md /= h.length;
+  let num = 0, den = 0;
+  for (const s of h) { num += (s.t - mt) * (s.d - md); den += (s.t - mt) ** 2; }
+  if (den === 0) return null;
+  return -(num / den) * 1000;
+}
+
+// ---- User / camera motion (ego-motion) -------------------------
+// A shrinking gap could be the object moving OR the user walking toward
+// it. The phone's motion sensors tell us which, so we only claim the
+// object is "coming towards you" when the user's movement can't explain it.
+let egoSamples = [];
+let egoListening = false;
+
+function onDeviceMotion(e) {
+  let mag = null;
+  const a = e.acceleration, ag = e.accelerationIncludingGravity;
+  if (a && a.x != null) mag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+  else if (ag && ag.x != null) mag = Math.abs(Math.hypot(ag.x || 0, ag.y || 0, ag.z || 0) - 9.81);
+  if (mag == null) return;
+  const r = e.rotationRate;
+  const rot = r ? Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0) : 0;
+  const now = Date.now();
+  egoSamples.push({ t: now, mag, rot });
+  while (egoSamples.length && egoSamples[0].t < now - EGO_WINDOW_MS) egoSamples.shift();
+}
+
+function startEgoMotion() {
+  if (egoListening) return;
+  const DME = window.DeviceMotionEvent;
+  if (!DME) return;
+  const listen = () => {
+    window.addEventListener('devicemotion', onDeviceMotion);
+    egoListening = true;
+  };
+  if (typeof DME.requestPermission === 'function') {
+    // iOS: must be requested straight from the button tap, before any await
+    DME.requestPermission().then(r => { if (r === 'granted') listen(); }).catch(() => {});
+  } else {
+    listen();
+  }
+}
+
+function stopEgoMotion() {
+  window.removeEventListener('devicemotion', onDeviceMotion);
+  egoListening = false;
+  egoSamples = [];
+}
+
+// 'still' | 'walking' | 'turning' | 'unknown'
+function getEgoMotion() {
+  const n = egoSamples.length;
+  if (n < 10 || Date.now() - egoSamples[n - 1].t > 500) return 'unknown';
+  let sumSq = 0, sumRot = 0;
+  for (const s of egoSamples) { sumSq += s.mag * s.mag; sumRot += s.rot; }
+  if (sumRot / n > EGO_TURN_DEG_S) return 'turning';
+  if (Math.sqrt(sumSq / n) > EGO_WALK_ACCEL_RMS) return 'walking';
+  return 'still';
+}
+
+function isObjectApproaching(track) {
+  const closing = closingSpeedMps(track);
+  if (closing == null) return false;
+  const ego = getEgoMotion();
+  if (ego === 'still')   return closing > OBJECT_APPROACH_MIN_MPS;
+  // Walking: the gap can close by up to walking pace on its own
+  if (ego === 'walking') return closing > USER_WALK_MAX_MPS + OBJECT_APPROACH_MIN_MPS;
+  return false;   // turning / unknown -> can't attribute motion reliably
+}
+
+// ---- Alerts ----------------------------------------------------
+// Spoken aloud, e.g. "Person 1 metre ahead, very close to you, move left."
+function buildDangerAlert(label, dist, side, approaching) {
+  const m = fmtMetres(dist);
+  const unit = m === '1' ? 'metre' : 'metres';
+  const state = approaching ? 'coming towards you' : 'very close to you';
+  const action = side === 'either' ? 'be careful' : `move ${side}`;
+  return `${label} ${m} ${unit} ahead, ${state}, ${action}.`;
+}
+
+function maybeSpeakDanger(det, dets, frameW, now) {
+  const t = det.track;
+  const label = TARGET_CLASSES[det.cls].label;
+
+  const { left, right } = sideObstacleScore(dets.filter(d => !isItem(d.cls)), frameW);
+  let side = chooseSafeSide(left, right);
+  // Don't flip-flop left/right when both sides are nearly equally blocked
+  if (t.lastSide && side !== t.lastSide &&
+      Math.abs(left - right) < SIDE_SWITCH_MARGIN * Math.max(left, right)) {
+    side = t.lastSide;
+  }
+
+  const text = buildDangerAlert(label, det.dist, side, isObjectApproaching(t));
+  const changed = t.lastDangerAt === 0 || side !== t.lastSide ||
+                  (t.lastDangerDist - det.dist) >= SIGNIFICANT_DIST_DROP_M;
+  const due = changed ? now - lastDangerSpokenAt >= DANGER_MIN_GAP_MS
+                      : now - t.lastDangerAt >= DANGER_COOLDOWN_MS;
+  if (!due) return;
+
+  speak(text, true);
+  t.lastDangerAt = now;
+  t.lastDangerDist = det.dist;
+  t.lastSide = side;
+  t.presenceAnnounced = true;   // no "Car ahead." straight after a warning
+  lastDangerSpokenAt = now;
+}
+
+function maybeSpeakPresence(dets, now) {
+  if (now - lastDangerSpokenAt < PRESENCE_QUIET_AFTER_DANGER_MS) return;
+  if (now - lastCalmAlertAt < ALERT_GAP_MS) return;
+  const ahead = dets
+    .filter(d => !isItem(d.cls) && d.inPath && !d.track.inDanger && !d.track.presenceAnnounced)
+    .sort((a, b) => a.dist - b.dist)[0];
+  if (!ahead) return;
+  // Already announced this class recently (e.g. same person re-detected)
+  ahead.track.presenceAnnounced = true;
+  if (now - (lastPresenceAt[ahead.cls] || 0) < PRESENCE_COOLDOWN_MS) return;
+
+  const label = TARGET_CLASSES[ahead.cls].label;
+  speak(`${label} ahead.`, true, `${label} ${fmtMetres(ahead.dist)} metres ahead.`);
+  lastPresenceAt[ahead.cls] = now;
+  lastCalmAlertAt = now;
+}
+
+// Everyday items: "Laptop on your left, about 1 metre." Nearest first,
+// each item once while it stays in view, each type at most every ITEM_COOLDOWN_MS.
+function maybeSpeakItem(dets, now) {
+  if (now - lastDangerSpokenAt < PRESENCE_QUIET_AFTER_DANGER_MS) return;
+  if (now - lastCalmAlertAt < ALERT_GAP_MS) return;
+  const item = dets
+    .filter(d => isItem(d.cls) && d.dist <= ITEM_MAX_DIST_M && !d.track.presenceAnnounced)
+    .sort((a, b) => a.dist - b.dist)[0];
+  if (!item) return;
+  item.track.presenceAnnounced = true;
+  if (now - (lastItemAt[item.cls] || 0) < ITEM_COOLDOWN_MS) return;
+
+  const label = TARGET_CLASSES[item.cls].label;
+  const where = item.inPath ? 'ahead' : `on your ${item.side}`;
+  const m = fmtMetres(item.dist);
+  speak(`${label} ${where}, about ${m} ${m === '1' ? 'metre' : 'metres'}.`, true);
+  lastItemAt[item.cls] = now;
+  lastCalmAlertAt = now;
+}
+
+// On-screen list of every target object in view with its distance
+function renderDetections(dets, now) {
+  detectionsEl.textContent = '';
+  const addRow = (text, cls) => {
+    const row = document.createElement('div');
+    row.textContent = text;
+    if (cls) row.className = cls;
+    detectionsEl.appendChild(row);
+  };
+  const hz = now - hazardDetsAt <= HAZARD_FRESH_MS ? hazardDets : [];
+  for (const h of hz) {
+    const where = h.inPath ? 'ahead' : (h.bbox[0] + h.bbox[2] / 2 < overlayEl.width / 2 ? 'to the left' : 'to the right');
+    addRow(`${h.label} ${where} (${Math.round(h.score * 100)}%)`, h.inPath ? 'danger' : null);
+  }
+  if (dets.length === 0) {
+    if (hz.length === 0) detectionsEl.textContent = 'Nothing detected ahead.';
+    return;
+  }
+  for (const d of [...dets].sort((a, b) => a.dist - b.dist)) {
+    const row = document.createElement('div');
+    const where = d.inPath ? 'ahead' : (d.side === 'left' ? 'to the left' : 'to the right');
+    row.textContent = `${TARGET_CLASSES[d.cls].label} ${fmtMetres(d.dist)} metres ${where}`;
+    if (d.inPath) row.className = d.track.inDanger ? 'danger' : 'inpath';
+    detectionsEl.appendChild(row);
+  }
+}
+
+async function guardTick() {
+  if (!guardActive || !guardModel || guardBusy || guardVideo.readyState < 2) return;
+  const frameW = guardVideo.videoWidth;
+  const frameH = guardVideo.videoHeight;
+  if (!frameW || !frameH) return;
+
+  // Skip this tick if the previous detection is still running
+  guardBusy = true;
+  let predictions = null;
+  try { predictions = await guardModel.detect(guardVideo, DETECT_MAX_BOXES, DETECT_MIN_SCORE); }
+  catch (_) {}
+  // Road hazards run on the same frame; own try/catch so a failure never
+  // breaks the person / vehicle alerts.
+  if (guardActive && hazardModel) {
+    try { updateHazardState(await detectHazards(frameW, frameH), frameW, Date.now()); }
+    catch (e) { console.warn('Hazard detection failed:', e); }
+  }
+  guardBusy = false;
+  if (!guardActive || !predictions) return;
+
+  const now = Date.now();
+  const lo = 0.5 - CENTRAL_ZONE / 2, hi = 0.5 + CENTRAL_ZONE / 2;
+
+  // Keep ONLY the obstacles and items in TARGET_CLASSES
+  const dets = predictions
+    .filter(p => Object.prototype.hasOwnProperty.call(TARGET_CLASSES, p.class))
+    .map(p => {
+      const [x, , w] = p.bbox;
+      const cx = (x + w / 2) / frameW;
+      return {
+        cls: p.class, bbox: p.bbox, score: p.score,
+        inPath: cx >= lo && cx <= hi,
+        side: cx < 0.5 ? 'left' : 'right',
+        rawDist: estimateDistanceM(p.class, p.bbox, frameW, frameH),
+      };
+    });
+
+  updateTracks(dets, now);
+  for (const d of dets) {
+    const t = d.track;
+    if (isItem(d.cls)) { t.inDanger = false; continue; }   // items are never a danger
+    t.inDanger = d.inPath && (d.dist <= DANGER_DISTANCE_M ||
+                 (t.inDanger && d.dist <= DANGER_DISTANCE_M + DANGER_HYSTERESIS_M));
+    if (!d.inPath) t.presenceAnnounced = false;
+  }
+  renderDetections(dets, now);
+  drawOverlay(dets, frameW, frameH, now);
+
+  // Danger (nearest in-path obstacle within 2 m) always beats everything else;
+  // then road hazards, then "Person ahead." style presence, then everyday items.
+  // Each calm alert respects ALERT_GAP_MS, so at most one speaks per tick.
+  const danger = dets.filter(d => d.track.inDanger).sort((a, b) => a.dist - b.dist)[0];
+  if (danger) maybeSpeakDanger(danger, dets, frameW, now);
+  else {
+    maybeSpeakHazard(now);
+    maybeSpeakPresence(dets, now);
+    maybeSpeakItem(dets, now);
+  }
+}
+
+// ---- Camera (shared by Proximity alert and Follow track) ---------
+// The camera is opened and shown first, before any model is loaded, so the
+// user sees the video at once. Models can take a while the first time
+// (they are downloaded), and loading never blocks the camera.
+const MODEL_LOAD_TIMEOUT_MS = 90000;
+
+async function openCamera() {
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw Object.assign(new Error('Camera needs a secure (https) page'), { name: 'InsecureContext' });
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+  } catch (e) {
+    if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw e;
+    // e.g. a laptop with no rear camera: take whichever camera there is
+    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  }
+  try {
+    guardVideo.srcObject = stream;
+    previewEl.classList.add('visible');
+    await guardVideo.play();
+  } catch (e) {
+    stream.getTracks().forEach(t => t.stop());
+    throw e;
+  }
+  return stream;
+}
+
+function cameraErrorMessage(e, feature) {
+  switch (e && e.name) {
+    case 'InsecureContext':
+      return `The camera only works when the app is opened from an https link. Could not start ${feature}.`;
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return `Camera permission is blocked. Allow the camera for this site in the browser settings, then start ${feature} again.`;
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+      return `No camera was found, so ${feature} could not start.`;
+    case 'NotReadableError':
+      return `The camera is being used by another app. Close it and start ${feature} again.`;
+    default:
+      return `Could not start the camera for ${feature}.`;
+  }
+}
+
+function withTimeout(promise, ms, what) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${what} timed out`)), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+async function startGuard() {
+  startEgoMotion();   // before any await, so iOS accepts the permission request
+  if (trackActive) stopTrack(false);
+  const session = ++guardSession;
+  guardActive = true;               // a second tap stops it, even while it is still starting
+  resetGuardHistory();
+  document.getElementById('btnGuard').textContent = 'Proximity alert: On (tap to stop)';
+  document.getElementById('btnGuard').classList.add('guard-on');
+  speak('Starting proximity alert.', true);
+
+  // 1. Camera first, so the video is visible straight away
+  let stream;
+  try {
+    stream = await openCamera();
+  } catch (e) {
+    if (session !== guardSession) return;
+    console.warn('Camera error:', e);
+    speak(cameraErrorMessage(e, 'proximity alert'), true);
+    stopGuard(false);
+    return;
+  }
+  if (session !== guardSession) { stream.getTracks().forEach(t => t.stop()); return; }
+  guardStream = stream;
+  keepScreenOn();
+  detectionsEl.classList.add('visible');
+  detectionsEl.textContent = 'Camera on. Loading the detection models…';
+  if (!guardModel) speak('Camera on. Loading the detection model, please wait.', true);
+
+  // 2. Then the models (the first time, they are downloaded)
+  let hazardsOk = false;
+  try {
+    await withTimeout(ensureGuardScripts(), MODEL_LOAD_TIMEOUT_MS, 'Detection scripts');
+    if (!guardModel) guardModel = await withTimeout(cocoSsd.load(), MODEL_LOAD_TIMEOUT_MS, 'Object detector');
+    // Optional extra: person / vehicle alerts still work if it fails
+    hazardsOk = await withTimeout(loadHazardModel(), MODEL_LOAD_TIMEOUT_MS, 'Hazard model').catch(() => false);
+  } catch (e) {
+    if (session !== guardSession) return;
+    console.warn('Proximity models failed to load:', e);
+    speak('Could not load the detection model. Check the internet connection and try again.', true);
+    stopGuard(false);
+    return;
+  }
+  if (session !== guardSession) return;
+  guardTimer = setInterval(guardTick, GUARD_DETECT_INTERVAL_MS);
+  detectionsEl.textContent = '';
+  speak(hazardsOk
+    ? 'Proximity alert is on. Watching for people, vehicles, animals, furniture, potholes, manholes and bumps ahead of you, and everyday items such as phones, bottles, books and laptops.'
+    : 'Proximity alert is on. Watching for people, vehicles, animals and furniture ahead of you, and everyday items such as phones, bottles, books and laptops. Road hazard detection could not load.', true);
+}
+
+function stopGuard(announce = true) {
+  guardSession++;
+  guardActive = false;
+  if (guardTimer) { clearInterval(guardTimer); guardTimer = null; }
+  if (guardStream) { guardStream.getTracks().forEach(t => t.stop()); guardStream = null; }
+  guardVideo.srcObject = null;
+  stopEgoMotion();
+  resetGuardHistory();
+  releaseScreen();
+  detectionsEl.classList.remove('visible');
+  detectionsEl.textContent = '';
+  document.getElementById('btnGuard').textContent = 'Proximity alert';
+  document.getElementById('btnGuard').classList.remove('guard-on');
+  previewEl.classList.remove('visible');
+  overlayCtx.clearRect(0, 0, overlayEl.width, overlayEl.height);
+  if (announce) speak('Proximity alert stopped.', true);
+}
+
+document.getElementById('btnGuard').addEventListener('click', () => {
+  if (guardActive) stopGuard(true); else startGuard();
+});
+
+// ---------------------------------------------------------------
+// FOLLOW TRACK — guides the user along tactile paving.
+// Main method: a YOLOv8-seg model (tactile_paving_yolov8.tflite) finds
+// candidate paving regions, and the Edge-Guided CNN
+// (tactile_edge_guided_classifier.tflite) confirms each one from its RGB crop
+// and Canny edge map. The masks of the confirmed regions show where the
+// paving is. A model with a separate warning-dots class (the earlier 3-class
+// model) also gets "Warning tiles just ahead. Stop and check ...".
+// Backup, if the model files can't load: bright-yellow pixels found by
+// colour (no model, works offline).
+// Either way the lower part of the camera image, i.e. the ground just ahead,
+// is split into a near band (bottom) and a far band (above it):
+//   near band — where the track is now:   straight / move left / move right
+//   far band  — where it is heading:      bends left / bends right / ends ahead
+// Spoken: "Track detected. Go straight along the track."
+//         "Track on your left, move left."  ...  "Track ended."
+// A message is spoken only after TRACK_CONFIRM frames in a row agree, and
+// repeated at most every TRACK_REPEAT_MS, so it doesn't chatter.
+// Thin yellow stripes (road edge lines) are ignored: only wide yellow
+// bands count. Large yellow areas (a yellow vehicle low in the frame,
+// painted kerbs, leaves) can still be mistaken for the track, and it
+// can't tell line (guide) tiles from dot (stop / warning) tiles.
+//
+// Uses the same camera preview as the proximity guard but never runs at
+// the same time as it.
+// ---------------------------------------------------------------
+const TRACK_INTERVAL_MS  = 250;
+const TRACK_SAMPLE_W     = 160;    // analyse a small copy of the frame (fast)
+const TRACK_GROUND_FROM  = 0.4;    // ground = bottom 60% of the frame
+const TRACK_MIN_FRACTION = 0.03;   // 3% of a band yellow = track is there
+// Road edge lines are thin stripes; the tactile track is a wide band.
+// A yellow run across a row must be at least this wide (fraction of the
+// image width) to count: NEAR at the bottom row, FAR at the top of the ground.
+const TRACK_MIN_RUN_NEAR = 0.08;
+const TRACK_MIN_RUN_FAR  = 0.025;
+const TRACK_RUN_GAP      = 3;      // pixels of non-yellow allowed inside one run (tile dots, grooves, joints)
+// What counts as "yellow". If real tiles are still missed, lower
+// TRACK_MIN_SAT / TRACK_MIN_VALUE; if grey road or dirt is picked up, raise them.
+const TRACK_MIN_SAT      = 0.28;   // 0 = grey .. 1 = vivid colour (was 0.45: only bright yellow)
+const TRACK_MIN_VALUE    = 70;     // brightness 0-255 (was 100: shaded tiles were dropped)
+const TRACK_HUE_MIN      = 42;     // degrees: 40 = sandy / dirt (rejected), 45 amber ...
+const TRACK_HUE_MAX      = 72;     // ... 60 pure yellow ... 70 slightly greenish
+const TRACK_CENTRE_TOL   = 0.15;   // within ±15% of the width from centre = straight ahead
+const TRACK_BEND_MIN     = 0.15;   // far band this far sideways from the near band = bend
+const TRACK_CONFIRM      = 3;      // frames in a row before a message is spoken
+const TRACK_LOST_FRAMES  = 6;      // about 1.5 s with no track = "Track ended."
+const TRACK_REPEAT_MS    = 8000;   // same message at most this often
+
+// Trained models, both next to index.html. Preprocessing matches training.
+const TRACK_YOLO_URL       = 'tactile_paving_yolov8.tflite';
+const TRACK_CLS_URL        = 'tactile_edge_guided_classifier.tflite';
+const TRACK_YOLO_MIN_SCORE = 0.3;
+const TRACK_NMS_IOU        = 0.45;
+const TRACK_MAX_REGIONS    = 4;     // classify at most this many regions per frame
+const TRACK_CLS_MIN_PROB   = 0.5;   // Edge-Guided CNN "tactile paving" probability to accept a region
+const TRACK_CLS_SIZE       = 128;   // classifier input size
+const TRACK_CROP_PAD       = 0.1;   // padding around each region before cropping
+// Class names by the number of classes in the model. The current model has one
+// class (all tactile paving); the earlier 3-class model also had warning dots.
+const TRACK_CLASSES_BY_COUNT = {
+  1: { labels: ['Tactile paving'], warning: -1 },
+  3: { labels: ['Guide bars', 'Guide bars', 'Warning dots'], warning: 2 },
+};
+const trackClassInfo = nc => TRACK_CLASSES_BY_COUNT[nc] || { labels: [], warning: -1 };
+const TRACK_MODEL_CONFIRM  = 2;     // the models run fewer frames per second, so confirm sooner
+const TRACK_MODEL_LOST     = 3;
+
+const btnTrack = document.getElementById('btnTrack');
+const trackCanvas = document.createElement('canvas');
+const trackCtx = trackCanvas.getContext('2d', { willReadFrequently: true });
+const trackMaskCanvas = document.createElement('canvas');
+const trackMaskCtx = trackMaskCanvas.getContext('2d');
+let trackMask = null;
+let trackActive = false;
+let trackStream = null;
+let trackTimer = null;
+let trackOn = false;          // currently on / near a track (announced)
+let trackCandidate = null;    // message seen in the last frames
+let trackCount = 0;           // how many frames in a row
+let trackMissing = 0;         // frames in a row with no track
+let trackSaid = null;
+let trackSaidAt = 0;
+let trackBusy = false;
+let trackModelsReady = false;
+let trackSession = 0;         // bumped on every start / stop, so a slow start can tell it was cancelled
+let trackMode = 'off';        // 'loading' (camera on, model loading) | 'model' | 'colour'
+let trackClsTried = false;    // the optional classifier is tried once per page load
+let trackYolo = null, trackYoloIn = null;   // { nchw, size }
+let trackCls = null, trackClsOrder = null;  // classifier input order, e.g. ['edge', 'rgb']
+let trackInput = null;
+const trackInCanvas = document.createElement('canvas');
+const trackInCtx = trackInCanvas.getContext('2d', { willReadFrequently: true });
+const clsCanvas = document.createElement('canvas');
+clsCanvas.width = clsCanvas.height = TRACK_CLS_SIZE;
+const clsCtx = clsCanvas.getContext('2d', { willReadFrequently: true });
+const trackModelMaskCanvas = document.createElement('canvas');
+const trackModelMaskCtx = trackModelMaskCanvas.getContext('2d');
+
+function resetTrackState() {
+  trackOn = false;
+  trackCandidate = null;
+  trackCount = 0;
+  trackMissing = 0;
+  trackSaid = null;
+  trackSaidAt = 0;
+}
+
+// Tactile-paving yellow, including faded, dusty and shaded tiles: a yellow
+// to amber hue, with at least some colour in it, not too dark. Grey asphalt
+// has almost no colour (low saturation) and is rejected by TRACK_MIN_SAT.
+function isTrackYellow(r, g, b) {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  if (max < TRACK_MIN_VALUE || d / max < TRACK_MIN_SAT || max === b) return false;
+  const h = max === r ? 60 * (g - b) / d : 60 * (2 + (b - r) / d);
+  return h >= TRACK_HUE_MIN && h <= TRACK_HUE_MAX;
+}
+
+// Where the yellow is in the near and far ground bands. x is the centre of
+// the yellow pixels, from -0.5 (left edge) to 0.5 (right edge); null = none.
+function analyseTrack() {
+  const vw = guardVideo.videoWidth, vh = guardVideo.videoHeight;
+  const W = TRACK_SAMPLE_W, H = Math.round(W * vh / vw);
+  if (trackCanvas.width !== W || trackCanvas.height !== H) {
+    trackCanvas.width = trackMaskCanvas.width = W;
+    trackCanvas.height = trackMaskCanvas.height = H;
+    trackMask = trackMaskCtx.createImageData(W, H);
+  }
+  trackCtx.drawImage(guardVideo, 0, 0, W, H);
+  const px = trackCtx.getImageData(0, 0, W, H).data;
+  const m = trackMask.data;
+  m.fill(0);
+
+  const y0 = Math.floor(H * TRACK_GROUND_FROM), yMid = Math.floor((y0 + H) / 2);
+  const far = { n: 0, sx: 0, total: 0 }, near = { n: 0, sx: 0, total: 0 };
+  for (let y = y0; y < H; y++) {
+    const band = y < yMid ? far : near;
+    band.total += W;
+    // Only wide yellow runs count. The track is a broad band, while road
+    // edge lines are thin stripes. Things look smaller further away, so the
+    // minimum width shrinks from the bottom row up to the top of the ground.
+    const depth = (y - y0) / Math.max(1, H - 1 - y0);              // 0 far .. 1 near
+    const minRun = W * (TRACK_MIN_RUN_FAR + (TRACK_MIN_RUN_NEAR - TRACK_MIN_RUN_FAR) * depth);
+    let start = -1, gap = 0;
+    for (let x = 0; x <= W; x++) {
+      const i = (y * W + x) * 4;
+      const yellow = x < W && isTrackYellow(px[i], px[i + 1], px[i + 2]);
+      if (yellow) { if (start < 0) start = x; gap = 0; continue; }
+      if (start >= 0 && x < W && ++gap <= TRACK_RUN_GAP) continue;   // tiny break inside the band
+      if (start >= 0) {
+        const end = x - gap;                                         // last yellow pixel + 1
+        if (end - start >= minRun) {
+          for (let k = start; k < end; k++) {
+            band.n++;
+            band.sx += k;
+            const j = (y * W + k) * 4;
+            m[j] = 0; m[j + 1] = 200; m[j + 2] = 255; m[j + 3] = 160;   // shown on the preview
+          }
+        }
+      }
+      start = -1; gap = 0;
+    }
+  }
+  const info = b => b.total && b.n / b.total >= TRACK_MIN_FRACTION
+    ? { x: b.sx / b.n / W - 0.5, frac: b.n / b.total } : null;
+  return { near: info(near), far: info(far), groundFrom: TRACK_GROUND_FROM };
+}
+
+function trackMessage({ near, far }) {
+  if (!near && !far) return null;
+  if (!near) {
+    if (far.x < -TRACK_CENTRE_TOL) return 'Track ahead on your left.';
+    if (far.x > TRACK_CENTRE_TOL) return 'Track ahead on your right.';
+    return 'Track ahead. Walk forward to reach it.';
+  }
+  if (near.x < -TRACK_CENTRE_TOL) return 'Track on your left, move left.';
+  if (near.x > TRACK_CENTRE_TOL) return 'Track on your right, move right.';
+  if (!far) return 'Track ends ahead.';
+  if (far.x - near.x < -TRACK_BEND_MIN) return 'Track bends left ahead.';
+  if (far.x - near.x > TRACK_BEND_MIN) return 'Track bends right ahead.';
+  return 'Go straight along the track.';
+}
+
+// Camera preview: yellow pixels highlighted, ground area and centre zone marked
+function drawTrackOverlay(frameW, frameH) {
+  if (overlayEl.width !== frameW || overlayEl.height !== frameH) {
+    overlayEl.width = frameW; overlayEl.height = frameH;
+  }
+  const g = overlayCtx;
+  g.clearRect(0, 0, frameW, frameH);
+  trackMaskCtx.putImageData(trackMask, 0, 0);
+  g.imageSmoothingEnabled = false;
+  g.drawImage(trackMaskCanvas, 0, 0, frameW, frameH);
+  drawTrackGuides(g, frameW, frameH);
+}
+
+// Ground line and the centre (straight ahead) zone
+function drawTrackGuides(g, frameW, frameH) {
+  g.lineWidth = Math.max(2, Math.round(frameW / 200));
+  g.strokeStyle = '#FFD23F';
+  g.setLineDash([10, 8]);
+  const top = frameH * TRACK_GROUND_FROM;
+  g.beginPath();
+  g.moveTo(0, top); g.lineTo(frameW, top);
+  for (const s of [-TRACK_CENTRE_TOL, TRACK_CENTRE_TOL]) {
+    const x = (0.5 + s) * frameW;
+    g.moveTo(x, top); g.lineTo(x, frameH);
+  }
+  g.stroke();
+  g.setLineDash([]);
+}
+
+// ---- Trained track models ---------------------------------------
+// YOLOv8 is what Follow track needs; true when it is ready, false if it
+// could not load (then the colour rule is used). The Edge-Guided classifier
+// is optional: guidance starts with YOLOv8 alone, and the classifier joins
+// in if and when it loads. If it can't load, YOLOv8 regions are used as they are.
+async function loadTrackModels() {
+  if (!trackModelsReady) {
+    try {
+      await withTimeout((async () => {
+        await ensureGuardScripts();
+        await ensureTFLiteRuntime();
+        const yolo = await tflite.loadTFLiteModel(TRACK_YOLO_URL);
+        const s = yolo.inputs[0].shape;             // [1,3,S,S] or [1,S,S,3]
+        const nchw = s[1] === 3;
+        trackYoloIn = { nchw, size: nchw ? s[2] : s[1] };
+        trackYolo = yolo;
+        trackModelsReady = true;
+      })(), MODEL_LOAD_TIMEOUT_MS, 'Track model');
+    } catch (e) {
+      console.warn('Track YOLOv8 model failed to load:', e);
+      return false;
+    }
+  }
+  if (!trackClsTried) {
+    trackClsTried = true;
+    tflite.loadTFLiteModel(TRACK_CLS_URL).then(cls => {
+      // The classifier has two inputs; the edge map has 1 channel, the RGB crop 3
+      trackClsOrder = cls.inputs.map(i => i.shape[i.shape.length - 1] === 1 ? 'edge' : 'rgb');
+      trackCls = cls;
+    }).catch(e => console.warn('Edge-Guided classifier not loaded, using YOLOv8 alone:', e));
+  }
+  return true;
+}
+
+// Canny edge map for the classifier's edge branch, following the OpenCV
+// steps used in training: grey -> 5x5 Gaussian (sigma 1.4) -> 3x3 Sobel ->
+// L1 gradient -> non-maximum suppression -> thresholds at 0.66x / 1.33x the
+// median brightness -> hysteresis. Returns 1 for edge pixels, 0 elsewhere.
+const CANNY_GAUSS = (() => {
+  const k = [-2, -1, 0, 1, 2].map(x => Math.exp(-x * x / (2 * 1.4 * 1.4)));
+  const s = k.reduce((a, b) => a + b, 0);
+  return k.map(v => v / s);
+})();
+
+function cannyEdges(rgba, W, H) {
+  const n = W * H;
+  const grey = new Float32Array(n), tmp = new Float32Array(n), blur = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    grey[i] = Math.round(0.299 * rgba[i * 4] + 0.587 * rgba[i * 4 + 1] + 0.114 * rgba[i * 4 + 2]);
+  }
+  const refl = (i, m) => i < 0 ? -i : i >= m ? 2 * m - 2 - i : i;   // OpenCV's default border
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let s = 0;
+      for (let k = 0; k < 5; k++) s += CANNY_GAUSS[k] * grey[y * W + refl(x + k - 2, W)];
+      tmp[y * W + x] = s;
+    }
+  }
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let s = 0;
+      for (let k = 0; k < 5; k++) s += CANNY_GAUSS[k] * tmp[refl(y + k - 2, H) * W + x];
+      blur[y * W + x] = Math.min(255, Math.round(s));
+    }
+  }
+
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) hist[blur[i]]++;
+  const kth = k => { let c = 0; for (let v = 0; v < 256; v++) { c += hist[v]; if (c > k) return v; } return 255; };
+  const med = n % 2 ? kth((n - 1) / 2) : (kth(n / 2 - 1) + kth(n / 2)) / 2;
+  const lo = Math.trunc(Math.max(0, 0.66 * med)), hi = Math.trunc(Math.min(255, 1.33 * med));
+
+  const px = (x, y) => blur[Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))];
+  const gxs = new Int16Array(n), gys = new Int16Array(n), mag = new Int32Array(n);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const gx = px(x + 1, y - 1) + 2 * px(x + 1, y) + px(x + 1, y + 1)
+               - px(x - 1, y - 1) - 2 * px(x - 1, y) - px(x - 1, y + 1);
+      const gy = px(x - 1, y + 1) + 2 * px(x, y + 1) + px(x + 1, y + 1)
+               - px(x - 1, y - 1) - 2 * px(x, y - 1) - px(x + 1, y - 1);
+      const i = y * W + x;
+      gxs[i] = gx; gys[i] = gy; mag[i] = Math.abs(gx) + Math.abs(gy);
+    }
+  }
+
+  const M = (x, y) => (x < 0 || y < 0 || x >= W || y >= H) ? 0 : mag[y * W + x];
+  const TG22 = 0.4142135623730951;
+  const state = new Uint8Array(n);    // 0 none, 1 weak, 2 strong
+  const stack = [];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x, m = mag[i];
+      if (m <= lo) continue;
+      const ax = Math.abs(gxs[i]), ay = Math.abs(gys[i]);
+      let peak;
+      if (ay < ax * TG22) peak = m > M(x - 1, y) && m >= M(x + 1, y);           // edge runs vertically
+      else if (ay > ax * (TG22 + 2)) peak = m > M(x, y - 1) && m >= M(x, y + 1);  // edge runs horizontally
+      else {
+        const s = (gxs[i] < 0) !== (gys[i] < 0) ? -1 : 1;
+        peak = m > M(x - s, y - 1) && m > M(x + s, y + 1);
+      }
+      if (!peak) continue;
+      if (m > hi) { state[i] = 2; stack.push(i); } else state[i] = 1;
+    }
+  }
+  while (stack.length) {                // weak edges connected to strong ones are kept
+    const i = stack.pop(), x = i % W, y = (i - x) / W;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const j = ny * W + nx;
+        if (state[j] === 1) { state[j] = 2; stack.push(j); }
+      }
+    }
+  }
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = state[i] === 2 ? 1 : 0;
+  return out;
+}
+
+// YOLOv8-seg on the current frame. Returns candidate regions (box in frame
+// pixels, box in letterbox pixels, class, score, mask coefficients) and the
+// mask prototypes with the letterbox geometry needed to place the masks.
+async function detectTrackRegions(frameW, frameH) {
+  const S = trackYoloIn.size;
+  if (trackInCanvas.width !== S) { trackInCanvas.width = S; trackInCanvas.height = S; }
+  // Letterbox: keep the aspect ratio, pad the rest with grey, as YOLOv8 does
+  const r = Math.min(S / frameW, S / frameH);
+  const nw = Math.round(frameW * r), nh = Math.round(frameH * r);
+  const dx = Math.floor((S - nw) / 2), dy = Math.floor((S - nh) / 2);
+  trackInCtx.fillStyle = 'rgb(114,114,114)';
+  trackInCtx.fillRect(0, 0, S, S);
+  trackInCtx.drawImage(guardVideo, dx, dy, nw, nh);
+  const px = trackInCtx.getImageData(0, 0, S, S).data;
+  const n = S * S;
+  if (!trackInput || trackInput.length !== 3 * n) trackInput = new Float32Array(3 * n);
+  if (trackYoloIn.nchw) {
+    for (let i = 0; i < n; i++) {
+      trackInput[i]         = px[i * 4]     / 255;
+      trackInput[n + i]     = px[i * 4 + 1] / 255;
+      trackInput[2 * n + i] = px[i * 4 + 2] / 255;
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      trackInput[i * 3]     = px[i * 4]     / 255;
+      trackInput[i * 3 + 1] = px[i * 4 + 1] / 255;
+      trackInput[i * 3 + 2] = px[i * 4 + 2] / 255;
+    }
+  }
+  const x = tf.tensor(trackInput, trackYoloIn.nchw ? [1, 3, S, S] : [1, S, S, 3]);
+  const out = trackYolo.predict(x);
+  x.dispose();
+  const outs = Array.isArray(out) ? out : (out.dataSync ? [out] : Object.values(out));
+  const detT = outs.find(t => t.shape.length === 3), protoT = outs.find(t => t.shape.length === 4);
+  const dShape = detT.shape, pShape = protoT.shape;
+  const det = await detT.data(), proto = await protoT.data();
+  disposeOutput(out);
+
+  // Detections [1, 4 + classes + 32, N] (usual) or [1, N, 4 + classes + 32]
+  let C = dShape[1], N = dShape[2], chFirst = true;
+  if (C > N) { C = dShape[2]; N = dShape[1]; chFirst = false; }
+  const at = chFirst ? (c, i) => det[c * N + i] : (c, i) => det[i * C + c];
+  // Prototypes [1, 32, h, w] (channels first) or [1, h, w, 32]
+  const pFirst = pShape[1] < pShape[3];
+  const nm = pFirst ? pShape[1] : pShape[3];
+  const PH = pFirst ? pShape[2] : pShape[1], PW = pFirst ? pShape[3] : pShape[2];
+  const nc = C - 4 - nm;
+
+  const cands = [];
+  let maxCoord = 0;
+  for (let i = 0; i < N; i++) {
+    let best = 0, cls = -1;
+    for (let c = 0; c < nc; c++) {
+      const s = at(4 + c, i);
+      if (s > best) { best = s; cls = c; }
+    }
+    const cx = at(0, i);
+    if (cx > maxCoord) maxCoord = cx;
+    if (best >= TRACK_YOLO_MIN_SCORE) cands.push({ i, cls, score: best, cx, cy: at(1, i), w: at(2, i), h: at(3, i) });
+  }
+  const k = maxCoord <= 2 ? S : 1;     // some exports give 0-1 coordinates
+  const boxes = cands.map(c => {
+    const lb = [(c.cx - c.w / 2) * k, (c.cy - c.h / 2) * k, (c.cx + c.w / 2) * k, (c.cy + c.h / 2) * k];
+    const box = [
+      Math.max(0, (lb[0] - dx) / r), Math.max(0, (lb[1] - dy) / r),
+      Math.min(frameW, (lb[2] - dx) / r), Math.min(frameH, (lb[3] - dy) / r),
+    ];
+    const coef = new Float32Array(nm);
+    for (let m = 0; m < nm; m++) coef[m] = at(4 + nc + m, c.i);
+    return { cls: c.cls, score: c.score, lb, box, coef };
+  }).filter(b => b.box[2] - b.box[0] > 1 && b.box[3] - b.box[1] > 1);
+
+  // Per-class non-maximum suppression, then the strongest few
+  boxes.sort((a, b) => b.score - a.score);
+  const regions = [];
+  for (const b of boxes) {
+    const toXywh = q => [q[0], q[1], q[2] - q[0], q[3] - q[1]];
+    if (regions.every(o => o.cls !== b.cls || iou(toXywh(o.box), toXywh(b.box)) < TRACK_NMS_IOU)) regions.push(b);
+    if (regions.length >= TRACK_MAX_REGIONS) break;
+  }
+  return { regions, proto, pFirst, nm, nc, PH, PW, S, dx, dy, nw, nh };
+}
+
+// Edge-Guided CNN: probability that a region is tactile paving.
+// Same preprocessing as training: crop with 10% padding, resize to
+// 128x128, RGB scaled to [-1, 1], Canny edge map as 0 / 1.
+function classifyTrackRegion(box, frameW, frameH) {
+  const [x1, y1, x2, y2] = box, bw = x2 - x1, bh = y2 - y1;
+  const sx = Math.max(0, Math.floor(x1 - TRACK_CROP_PAD * bw)), ex = Math.min(frameW, Math.floor(x2 + TRACK_CROP_PAD * bw));
+  const sy = Math.max(0, Math.floor(y1 - TRACK_CROP_PAD * bh)), ey = Math.min(frameH, Math.floor(y2 + TRACK_CROP_PAD * bh));
+  if (ex - sx < 16 || ey - sy < 16) return 0;
+  const Z = TRACK_CLS_SIZE;
+  clsCtx.drawImage(guardVideo, sx, sy, ex - sx, ey - sy, 0, 0, Z, Z);
+  const px = clsCtx.getImageData(0, 0, Z, Z).data;
+  const rgb = new Float32Array(Z * Z * 3);
+  for (let i = 0; i < Z * Z; i++) {
+    rgb[i * 3]     = px[i * 4]     / 127.5 - 1;
+    rgb[i * 3 + 1] = px[i * 4 + 1] / 127.5 - 1;
+    rgb[i * 3 + 2] = px[i * 4 + 2] / 127.5 - 1;
+  }
+  const edge = cannyEdges(px, Z, Z);
+  const inputs = trackClsOrder.map(k => k === 'edge' ? tf.tensor(edge, [1, Z, Z, 1]) : tf.tensor(rgb, [1, Z, Z, 3]));
+  const out = trackCls.predict(inputs);
+  inputs.forEach(t => t.dispose());
+  const p = firstOutput(out).dataSync()[1];    // [background, tactile paving]
+  disposeOutput(out);
+  return p;
+}
+
+// Masks of the confirmed regions, measured in the near and far ground
+// bands (same result shape as analyseTrack, plus warning tiles).
+function measureTrackMasks(res, kept) {
+  const { proto, pFirst, nm, nc, PH, PW, S, dx, dy, nw, nh } = res;
+  const warningClass = trackClassInfo(nc).warning;
+  const path = new Uint8Array(PH * PW), warn = new Uint8Array(PH * PW);
+  const gx = S / PW, gy = S / PH;     // letterbox pixels per mask cell
+  for (const d of kept) {
+    const target = d.cls === warningClass ? warn : path;
+    const x1 = Math.max(0, Math.floor(d.lb[0] / gx)), x2 = Math.min(PW, Math.ceil(d.lb[2] / gx));
+    const y1 = Math.max(0, Math.floor(d.lb[1] / gy)), y2 = Math.min(PH, Math.ceil(d.lb[3] / gy));
+    for (let y = y1; y < y2; y++) {
+      for (let x = x1; x < x2; x++) {
+        let v = 0;
+        for (let m = 0; m < nm; m++) {
+          v += d.coef[m] * (pFirst ? proto[(m * PH + y) * PW + x] : proto[(y * PW + x) * nm + m]);
+        }
+        if (v > 0) target[y * PW + x] = 1;      // sigmoid(v) > 0.5
+      }
+    }
+  }
+
+  const mid = (TRACK_GROUND_FROM + 1) / 2;
+  const far = { n: 0, sx: 0, total: 0, warn: 0 }, near = { n: 0, sx: 0, total: 0, warn: 0 };
+  for (let y = 0; y < PH; y++) {
+    const v = ((y + 0.5) * gy - dy) / nh;       // 0 top .. 1 bottom of the camera frame
+    if (v < TRACK_GROUND_FROM || v >= 1) continue;
+    const band = v < mid ? far : near;
+    for (let x = 0; x < PW; x++) {
+      const u = ((x + 0.5) * gx - dx) / nw;     // 0 left .. 1 right
+      if (u < 0 || u >= 1) continue;
+      const i = y * PW + x;
+      band.total++;
+      if (path[i]) { band.n++; band.sx += u; }
+      if (warn[i]) band.warn++;
+    }
+  }
+  const info = b => b.total && b.n / b.total >= TRACK_MIN_FRACTION
+    ? { x: b.sx / b.n - 0.5, frac: b.n / b.total } : null;
+  const hasWarn = b => b.total > 0 && b.warn / b.total >= TRACK_MIN_FRACTION;
+  return { near: info(near), far: info(far), warnNear: hasWarn(near), warnFar: hasWarn(far), path, warn };
+}
+
+// Camera preview: guide bars in blue, warning tiles in red, region boxes
+// (green = confirmed by the Edge-Guided CNN, grey = rejected)
+function drawTrackModelOverlay(frameW, frameH, res, t) {
+  if (overlayEl.width !== frameW || overlayEl.height !== frameH) {
+    overlayEl.width = frameW; overlayEl.height = frameH;
+  }
+  const g = overlayCtx;
+  g.clearRect(0, 0, frameW, frameH);
+  const { PW, PH, S, dx, dy, nw, nh } = res;
+  if (trackModelMaskCanvas.width !== PW || trackModelMaskCanvas.height !== PH) {
+    trackModelMaskCanvas.width = PW; trackModelMaskCanvas.height = PH;
+  }
+  const img = trackModelMaskCtx.createImageData(PW, PH);
+  for (let i = 0; i < PW * PH; i++) {
+    if (t.warn[i])      { img.data[i * 4] = 255; img.data[i * 4 + 1] = 90;  img.data[i * 4 + 2] = 67;  img.data[i * 4 + 3] = 150; }
+    else if (t.path[i]) { img.data[i * 4] = 0;   img.data[i * 4 + 1] = 200; img.data[i * 4 + 2] = 255; img.data[i * 4 + 3] = 150; }
+  }
+  trackModelMaskCtx.putImageData(img, 0, 0);
+  const gx = S / PW, gy = S / PH;
+  g.imageSmoothingEnabled = false;
+  g.drawImage(trackModelMaskCanvas, dx / gx, dy / gy, nw / gx, nh / gy, 0, 0, frameW, frameH);
+
+  const fs = Math.max(12, Math.round(frameW / 30));
+  g.font = `700 ${fs}px sans-serif`;
+  g.textBaseline = 'top';
+  g.lineWidth = Math.max(2, Math.round(frameW / 200));
+  for (const d of res.regions) {
+    const [x1, y1, x2, y2] = d.box;
+    const colour = d.ok ? '#3DDC84' : 'rgba(200,200,200,0.8)';
+    g.strokeStyle = colour;
+    g.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    g.fillStyle = colour;
+    g.fillText(`${trackClassInfo(res.nc).labels[d.cls] || 'Tactile paving'} ${Math.round(d.p * 100)}%`, x1 + 4, y1 + 4);
+  }
+  drawTrackGuides(g, frameW, frameH);
+}
+
+async function analyseTrackModel(frameW, frameH) {
+  const res = await detectTrackRegions(frameW, frameH);
+  if (!trackActive) return null;
+  for (const d of res.regions) {
+    // Without the classifier every YOLOv8 region is used, with its own score
+    d.p = trackCls ? classifyTrackRegion(d.box, frameW, frameH) : d.score;
+    d.ok = !trackCls || d.p >= TRACK_CLS_MIN_PROB;
+  }
+  const confirmed = res.regions.filter(d => d.ok);
+  const t = measureTrackMasks(res, confirmed);
+  drawTrackModelOverlay(frameW, frameH, res, t);
+  return t;
+}
+
+// Warning tiles mark a decision point (crossing, steps, junction), so they
+// come before the path directions
+function trackModelMessage(t) {
+  if (t.warnNear) return 'Warning tiles just ahead. Stop and check before you continue.';
+  const msg = trackMessage(t);
+  if (!msg && t.warnFar) return 'Warning tiles ahead.';
+  return msg;
+}
+
+async function trackTick() {
+  // While the model is loading the camera video is already shown; guidance starts once it is ready
+  if (!trackActive || trackBusy || trackMode === 'loading' || guardVideo.readyState < 2) return;
+  const frameW = guardVideo.videoWidth, frameH = guardVideo.videoHeight;
+  if (!frameW || !frameH) return;
+
+  const useModel = trackMode === 'model';
+  let t = null;
+  if (useModel) {
+    trackBusy = true;
+    try { t = await analyseTrackModel(frameW, frameH); }
+    catch (e) { console.warn('Track model failed:', e); }
+    finally { trackBusy = false; }
+    if (!trackActive || !t) return;
+  } else {
+    t = analyseTrack();
+    drawTrackOverlay(frameW, frameH);
+  }
+  const confirmNeeded = useModel ? TRACK_MODEL_CONFIRM : TRACK_CONFIRM;
+  const lostAfter = useModel ? TRACK_MODEL_LOST : TRACK_LOST_FRAMES;
+
+  const msg = useModel ? trackModelMessage(t) : trackMessage(t);
+  if (msg === trackCandidate) trackCount++;
+  else { trackCandidate = msg; trackCount = 1; }
+  trackMissing = msg ? 0 : trackMissing + 1;
+
+  // Was following a track and it has gone for a while
+  if (trackOn && trackMissing >= lostAfter) {
+    trackOn = false;
+    trackSaid = null;
+    speak('Track ended.', true);
+    return;
+  }
+  if (!msg || trackCount < confirmNeeded) return;
+
+  const now = Date.now();
+  if (msg === trackSaid && now - trackSaidAt < TRACK_REPEAT_MS) return;
+  speak(trackOn ? msg : `Track detected. ${msg}`, true);
+  trackOn = true;
+  trackSaid = msg;
+  trackSaidAt = now;
+}
+
+async function startTrack() {
+  if (guardActive) stopGuard(false);
+  const session = ++trackSession;
+  trackActive = true;               // a second tap stops it, even while it is still starting
+  trackMode = 'loading';
+  resetTrackState();
+  btnTrack.textContent = 'Follow track: On (tap to stop)';
+  btnTrack.classList.add('guard-on');
+  speak('Starting track guide.', true);
+
+  // 1. Camera first, so the video is visible straight away
+  let stream;
+  try {
+    stream = await openCamera();
+  } catch (e) {
+    if (session !== trackSession) return;
+    console.warn('Camera error:', e);
+    speak(cameraErrorMessage(e, 'the track guide'), true);
+    stopTrack(false);
+    return;
+  }
+  if (session !== trackSession) { stream.getTracks().forEach(t => t.stop()); return; }
+  trackStream = stream;
+  keepScreenOn();
+  trackTimer = setInterval(trackTick, TRACK_INTERVAL_MS);
+  if (!trackModelsReady) speak('Camera on. Loading the track model, please wait.', true);
+
+  // 2. Then YOLOv8 (the first time, it is downloaded). The colour rule is used if it can't load.
+  const modelOk = await loadTrackModels();
+  if (session !== trackSession) return;
+  trackMode = modelOk ? 'model' : 'colour';
+  speak(modelOk
+    ? 'Track guide is on. Point the camera at the ground ahead. Looking for tactile paving.'
+    : 'Track guide is on. The track model could not load, so only bright yellow paving can be found. Point the camera at the ground ahead.', true);
+}
+
+function stopTrack(announce = true) {
+  trackSession++;
+  trackActive = false;
+  trackMode = 'off';
+  if (trackTimer) { clearInterval(trackTimer); trackTimer = null; }
+  if (trackStream) { trackStream.getTracks().forEach(t => t.stop()); trackStream = null; }
+  guardVideo.srcObject = null;
+  resetTrackState();
+  releaseScreen();
+  btnTrack.textContent = 'Follow track';
+  btnTrack.classList.remove('guard-on');
+  previewEl.classList.remove('visible');
+  overlayCtx.clearRect(0, 0, overlayEl.width, overlayEl.height);
+  if (announce) speak('Track guide stopped.', true);
+}
+
+btnTrack.addEventListener('click', () => {
+  if (trackActive) stopTrack(true); else startTrack();
+});
+
+// ---------------------------------------------------------------
+// EMERGENCY SOS + FALL DETECTION
+// The Emergency SOS button sends:
+//   "Help, I am at https://maps.google.com/?q=lat,lon ..."
+// to a saved contact by SMS or WhatsApp.
+//
+// A web page can't send a message on its own: it opens the Messages /
+// WhatsApp app with the contact and message filled in, and Send must be
+// pressed there (with TalkBack / VoiceOver, or by someone nearby). Sending
+// with no tap at all would need an SMS service and a server.
+//
+// Fall detection watches the accelerometer for free fall (the phone
+// feels almost weightless) followed quickly by a hard impact. It then
+// counts down FALL_CANCEL_SECS seconds, speaking and vibrating, and sends
+// the SOS unless the user taps "I'm OK". It only works while this page
+// is open in the browser.
+// ---------------------------------------------------------------
+const SOS_STORE_KEY        = 'campusNavigatorSos';
+const SOS_GPS_TIMEOUT_MS   = 10000;
+const FALL_CANCEL_SECS     = 20;
+const FALL_FREEFALL_MS2    = 3;     // total acceleration below this = free fall (gravity is 9.8)
+const FALL_FREEFALL_MIN_MS = 80;    // free fall must last this long (a drop of about 3 cm or more)
+const FALL_IMPACT_MS2      = 25;    // then an impact above this ...
+const FALL_IMPACT_WINDOW_MS = 1000; // ... within this time of the free fall
+
+const sosSetupEl = document.getElementById('sosSetup');
+const fallAlertEl = document.getElementById('fallAlert');
+const fallTextEl = document.getElementById('fallText');
+let sosBusy = false;
+let fallTimer = null;
+let fallSecsLeft = 0;
+let safetyListening = false;
+let freeFallStart = 0, freeFallEndedAt = 0;
+
+// ---- Saved contact (stays on this phone only) -------------------
+function loadSos() {
+  const defaults = { number: '+91 9514666199', method: 'sms', fall: true };
+  try { return { ...defaults, ...JSON.parse(localStorage.getItem(SOS_STORE_KEY) || '{}') }; }
+  catch (_) { return defaults; }
+}
+function saveSos(s) {
+  try { localStorage.setItem(SOS_STORE_KEY, JSON.stringify(s)); return true; }
+  catch (_) { return false; }
+}
+
+function openSosSetup() {
+  const s = loadSos();
+  document.getElementById('sosNumber').value = s.number;
+  document.getElementById('sosMethod').value = s.method;
+  document.getElementById('sosFall').checked = s.fall;
+  sosSetupEl.hidden = false;
+  document.getElementById('sosNumber').focus();
+}
+function closeSosSetup() {
+  sosSetupEl.hidden = true;
+  document.getElementById('btnSosSetup').focus();
+}
+
+document.getElementById('btnSosSetup').addEventListener('click', openSosSetup);
+document.getElementById('sosClose').addEventListener('click', closeSosSetup);
+document.getElementById('sosSave').addEventListener('click', () => {
+  const number = document.getElementById('sosNumber').value.trim();
+  if (number.replace(/\D/g, '').length < 8) {
+    speak('Please enter the phone number with country code.', true);
+    document.getElementById('sosNumber').focus();
+    return;
+  }
+  const ok = saveSos({
+    number,
+    method: document.getElementById('sosMethod').value,
+    fall: document.getElementById('sosFall').checked,
+  });
+  closeSosSetup();
+  speak(ok ? 'SOS contact saved. Press the Emergency SOS button to send your location.'
+           : 'Could not save the SOS contact on this phone.', true);
+});
+
+// ---- Location ----------------------------------------------------
+function getPosition() {
+  return new Promise((resolve, reject) => {
+    if (!('geolocation' in navigator)) return reject(new Error('no-geolocation'));
+    navigator.geolocation.getCurrentPosition(resolve, reject,
+      { enableHighAccuracy: true, timeout: SOS_GPS_TIMEOUT_MS, maximumAge: 30000 });
+  });
+}
+
+function buildSosMessage(pos, reason) {
+  const fell = reason === 'fall' ? 'I may have fallen. ' : '';
+  if (!pos) return `Help, I need assistance. ${fell}My location could not be found. (Emergency message from Campus Navigator)`;
+  const { latitude, longitude, accuracy } = pos.coords;
+  const link = `https://maps.google.com/?q=${latitude.toFixed(6)},${longitude.toFixed(6)}`;
+  return `Help, I am at ${link} (accurate to about ${Math.round(accuracy)} m). ${fell}(Emergency message from Campus Navigator)`;
+}
+
+function sosUrl(s, message) {
+  if (s.method === 'whatsapp') {
+    return `https://wa.me/${s.number.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+  }
+  // "?&body=" works on both Android ("?body=") and iPhone ("&body=")
+  return `sms:${s.number.replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(message)}`;
+}
+
+// reason: 'button' | 'fall'
+async function sendSOS(reason) {
+  if (sosBusy) return;
+  const s = loadSos();
+  if (!s.number) {
+    speak('No SOS contact is saved. Ask someone to set up the SOS contact.', true);
+    openSosSetup();
+    return;
+  }
+  sosBusy = true;
+  try {
+    if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
+    speak('Sending SOS. Finding your location.', true);
+    let pos = null;
+    try { pos = await getPosition(); } catch (e) { console.warn('SOS location error:', e); }
+    const message = buildSosMessage(pos, reason);
+    const app = s.method === 'whatsapp' ? 'WhatsApp' : 'Messages';
+    speak(`${pos ? '' : 'Location not found. '}Opening ${app}. Press Send to send the SOS.`, true,
+          `Opening ${app}. Press Send to send:\n${message}`);
+    // Let the announcement start, then hand over to the messaging app
+    await new Promise(r => setTimeout(r, 2500));
+    location.href = sosUrl(s, message);
+  } finally {
+    sosBusy = false;
+  }
+}
+
+document.getElementById('btnSos').addEventListener('click', () => sendSOS('button'));
+
+// ---- Fall countdown ---------------------------------------------
+function onFallDetected() {
+  const s = loadSos();
+  if (!s.fall || !s.number || fallTimer || sosBusy) return;
+  fallSecsLeft = FALL_CANCEL_SECS;
+  fallAlertEl.hidden = false;
+  document.getElementById('fallCancel').focus();
+  if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]);
+  speak(`Fall detected. Sending SOS in ${FALL_CANCEL_SECS} seconds. Tap the screen if you are OK.`, true);
+  updateFallText();
+  fallTimer = setInterval(() => {
+    fallSecsLeft--;
+    updateFallText();
+    if (fallSecsLeft <= 0) {
+      endFallCountdown();
+      sendSOS('fall');
+    } else if (fallSecsLeft === 10 || fallSecsLeft === 5) {
+      if (navigator.vibrate) navigator.vibrate(400);
+      speak(`Sending SOS in ${fallSecsLeft} seconds.`, true);
+    }
+  }, 1000);
+}
+
+function updateFallText() {
+  fallTextEl.textContent = `Fall detected.\nSending SOS in ${fallSecsLeft} seconds.`;
+}
+
+function endFallCountdown() {
+  if (fallTimer) { clearInterval(fallTimer); fallTimer = null; }
+  fallAlertEl.hidden = true;
+}
+
+document.getElementById('fallCancel').addEventListener('click', () => {
+  endFallCountdown();
+  speak('SOS cancelled.', true);
+});
+document.getElementById('fallSendNow').addEventListener('click', () => {
+  endFallCountdown();
+  sendSOS('fall');
+});
+
+// ---- Motion: fall detection --------------------------------------
+function onSafetyMotion(e) {
+  const now = Date.now();
+  const ag = e.accelerationIncludingGravity;
+  if (!ag || ag.x == null) return;
+  const total = Math.hypot(ag.x || 0, ag.y || 0, ag.z || 0);
+  // Fall = free fall long enough, then a hard impact soon after
+  if (total < FALL_FREEFALL_MS2) {
+    if (!freeFallStart) freeFallStart = now;
+  } else {
+    if (freeFallStart && now - freeFallStart >= FALL_FREEFALL_MIN_MS) freeFallEndedAt = now;
+    freeFallStart = 0;
+    if (freeFallEndedAt && total > FALL_IMPACT_MS2 && now - freeFallEndedAt <= FALL_IMPACT_WINDOW_MS) {
+      freeFallEndedAt = 0;
+      onFallDetected();
+    }
+  }
+}
+
+// Fall detection starts as soon as the page opens. iPhone only allows
+// them after a tap (it asks permission then), so there they start on
+// the first tap anywhere in the app.
+function startSafetyMotion() {
+  if (safetyListening) return;
+  const DME = window.DeviceMotionEvent;
+  if (!DME) return;
+  safetyListening = true;
+  const listen = () => window.addEventListener('devicemotion', onSafetyMotion);
+  if (typeof DME.requestPermission === 'function') {
+    DME.requestPermission()
+      .then(r => { if (r === 'granted') listen(); else safetyListening = false; })
+      .catch(() => { safetyListening = false; });
+  } else {
+    listen();
+  }
+}
+document.addEventListener('click', startSafetyMotion);
+if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission !== 'function') {
+  startSafetyMotion();
+}
+</script>
+</body>
+</html>
